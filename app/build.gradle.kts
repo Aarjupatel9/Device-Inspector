@@ -78,6 +78,7 @@ dependencies {
     // NOTE: Accompanist is largely deprecated. This is the latest version, but consider
     // migrating to the official APIs built into Compose Foundation.
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.34.0")
+    implementation("com.google.accompanist:accompanist-drawablepainter:0.34.0")
 
     // Testing - Updated to latest versions
     testImplementation("junit:junit:4.13.2")
