@@ -20,5 +20,17 @@ data class AppUsageInfo(
     val appName: String,
     val packageName: String,
     val totalTimeInForeground: Long,
-    val icon: Drawable?
+    val icon: Drawable?,
+    // New: A map of daily usage (Timestamp of day start -> Milliseconds of usage)
+    val dailyUsage: Map<Long, Long>
+)
+
+// Data class to hold information for a single app launch event
+data class AppEventInfo(
+    val appName: String,
+    val packageName: String,
+    val eventTime: Long,
+    val icon: Drawable?,
+    // New: The specific activity that was launched
+    val activityName: String?
 )
