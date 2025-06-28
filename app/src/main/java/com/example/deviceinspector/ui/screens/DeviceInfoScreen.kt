@@ -1,5 +1,6 @@
 /*
  * This file contains the UI and logic for the Device Info screen.
+ * It now receives its data as a parameter to prevent re-fetching on tab switch.
  * Location: app/src/main/java/com/example/deviceinspector/ui/screens/DeviceInfoScreen.kt
  */
 package com.example.deviceinspector.ui.screens
@@ -22,74 +23,79 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.deviceinspector.data.*
 import com.example.deviceinspector.ui.components.GenericScreen
-import java.io.File
 import java.text.DecimalFormat
 
 @Composable
-fun DeviceInfoScreen() {
-    val context = LocalContext.current
-    val deviceInfo by remember { mutableStateOf(getDetailedDeviceInfo(context)) }
-
+fun DeviceInfoScreen(deviceInfo: DeviceInfo?) {
     GenericScreen("Device Information") {
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(vertical = 8.dp)
-        ) {
-            item {
-                InfoCategoryCard(
-                    title = "Hardware",
-                    icon = Icons.Default.Memory,
-                    info = mapOf(
-                        "Model" to deviceInfo.hardware.model,
-                        "Manufacturer" to deviceInfo.hardware.manufacturer,
-                        "Brand" to deviceInfo.hardware.brand,
-                        "Device" to deviceInfo.hardware.device,
-                        "Product" to deviceInfo.hardware.product,
-                        "Hardware" to deviceInfo.hardware.hardware,
-                        "CPU ABI" to deviceInfo.hardware.cpuAbi
-                    )
-                )
+        when (deviceInfo) {
+            null -> {
+                // Show a loading indicator while the data is being fetched.
+                CircularProgressIndicator()
+                Text("Loading device info...", modifier = Modifier.padding(top = 16.dp))
             }
-            item {
-                InfoCategoryCard(
-                    title = "Software",
-                    icon = Icons.Default.Android,
-                    info = mapOf(
-                        "Android Version" to deviceInfo.software.androidVersion,
-                        "API Level" to deviceInfo.software.apiLevel,
-                        "Security Patch" to deviceInfo.software.securityPatch,
-                        "Build ID" to deviceInfo.software.buildId,
-                        "Kernel Version" to deviceInfo.software.kernelVersion
-                    )
-                )
-            }
-            item {
-                InfoCategoryCard(
-                    title = "Memory & Storage",
-                    icon = Icons.Default.Storage,
-                    info = mapOf(
-                        "Total RAM" to deviceInfo.memory.totalRam,
-                        "Available RAM" to deviceInfo.memory.availableRam,
-                        "Total Internal" to deviceInfo.memory.totalInternalStorage,
-                        "Available Internal" to deviceInfo.memory.availableInternalStorage
-                    )
-                )
-            }
-            item {
-                InfoCategoryCard(
-                    title = "Display",
-                    icon = Icons.Default.StayCurrentPortrait,
-                    info = mapOf(
-                        "Resolution" to deviceInfo.display.resolution,
-                        "Density" to deviceInfo.display.density,
-                        "Refresh Rate" to deviceInfo.display.refreshRate
-                    )
-                )
+            else -> {
+                // Once data is loaded, display it.
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp)
+                ) {
+                    item {
+                        InfoCategoryCard(
+                            title = "Hardware",
+                            icon = Icons.Default.Memory,
+                            info = mapOf(
+                                "Model" to deviceInfo.hardware.model,
+                                "Manufacturer" to deviceInfo.hardware.manufacturer,
+                                "Brand" to deviceInfo.hardware.brand,
+                                "Device" to deviceInfo.hardware.device,
+                                "Product" to deviceInfo.hardware.product,
+                                "Hardware" to deviceInfo.hardware.hardware,
+                                "CPU ABI" to deviceInfo.hardware.cpuAbi
+                            )
+                        )
+                    }
+                    item {
+                        InfoCategoryCard(
+                            title = "Software",
+                            icon = Icons.Default.Android,
+                            info = mapOf(
+                                "Android Version" to deviceInfo.software.androidVersion,
+                                "API Level" to deviceInfo.software.apiLevel,
+                                "Security Patch" to deviceInfo.software.securityPatch,
+                                "Build ID" to deviceInfo.software.buildId,
+                                "Kernel Version" to deviceInfo.software.kernelVersion
+                            )
+                        )
+                    }
+                    item {
+                        InfoCategoryCard(
+                            title = "Memory & Storage",
+                            icon = Icons.Default.Storage,
+                            info = mapOf(
+                                "Total RAM" to deviceInfo.memory.totalRam,
+                                "Available RAM" to deviceInfo.memory.availableRam,
+                                "Total Internal" to deviceInfo.memory.totalInternalStorage,
+                                "Available Internal" to deviceInfo.memory.availableInternalStorage
+                            )
+                        )
+                    }
+                    item {
+                        InfoCategoryCard(
+                            title = "Display",
+                            icon = Icons.Default.StayCurrentPortrait,
+                            info = mapOf(
+                                "Resolution" to deviceInfo.display.resolution,
+                                "Density" to deviceInfo.display.density,
+                                "Refresh Rate" to deviceInfo.display.refreshRate
+                            )
+                        )
+                    }
+                }
             }
         }
     }
@@ -155,7 +161,7 @@ fun InfoRow(label: String, value: String) {
 }
 
 
-private fun getDetailedDeviceInfo(context: Context): DeviceInfo {
+internal fun getDetailedDeviceInfo(context: Context): DeviceInfo {
     // Hardware Info
     val hardwareInfo = HardwareInfo(
         model = Build.MODEL,
@@ -226,7 +232,7 @@ private fun getDetailedDeviceInfo(context: Context): DeviceInfo {
     )
 }
 
-private fun formatBytes(bytes: Long): String {
+internal fun formatBytes(bytes: Long): String {
     if (bytes < 1024) return "$bytes B"
     val df = DecimalFormat("#.##")
     val kb = bytes / 1024.0

@@ -1,5 +1,6 @@
 /*
  * This file contains the UI and logic for the App Usage screen.
+ * It now receives its data as a parameter to prevent re-fetching on tab switch.
  * Location: app/src/main/java/com/example/deviceinspector/ui/screens/UsageScreen.kt
  */
 package com.example.deviceinspector.ui.screens
@@ -46,6 +47,8 @@ import com.example.deviceinspector.data.AppUsageInfo
 import com.example.deviceinspector.ui.components.GenericScreen
 import com.example.deviceinspector.util.formatUsageTime
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlin.math.ceil
@@ -57,14 +60,38 @@ enum class ChartType { DAILY, HOURLY, TODAY }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UsageScreen() {
-    val context = LocalContext.current
+fun UsageScreen(initialApps: List<AppUsageInfo>?) {
     var chartType by remember { mutableStateOf(ChartType.DAILY) }
     // Add "Today" to the list of options
     val chartTypes = listOf("7 Days", "24 Hours", "Today")
 
-    val appUsageState = produceState<List<AppUsageInfo>?>(initialValue = null) {
-        value = getAppUsageStats(context)
+    // State for the final, sorted list that the UI will display
+    var sortedApps by remember { mutableStateOf<List<AppUsageInfo>?>(null) }
+
+    // This effect runs whenever the pre-fetched data or the chart type changes.
+    // It performs the sorting on a background thread.
+    LaunchedEffect(initialApps, chartType) {
+        if (initialApps == null) {
+            sortedApps = null // Show loading indicator if initial fetch is not done
+            return@LaunchedEffect
+        }
+
+        sortedApps = null // Show loading indicator while re-sorting
+
+        sortedApps = withContext(Dispatchers.Default) {
+            initialApps.sortedByDescending { app ->
+                when (chartType) {
+                    ChartType.DAILY -> app.totalTimeInForeground
+                    ChartType.HOURLY -> app.hourlyUsageEvents.sumOf { it.second - it.first }
+                    ChartType.TODAY -> {
+                        val todayStart = getDayStart(System.currentTimeMillis())
+                        app.hourlyUsageEvents
+                            .filter { (start, end) -> end > todayStart && start < System.currentTimeMillis() }
+                            .sumOf { (start, end) -> end - max(todayStart, start) }
+                    }
+                }
+            }
+        }
     }
 
     GenericScreen("App Usage") {
@@ -88,7 +115,8 @@ fun UsageScreen() {
         }
         Spacer(modifier = Modifier.height(16.dp))
 
-        when (val apps = appUsageState.value) {
+        // The UI now observes the `sortedApps` state
+        when (val apps = sortedApps) {
             null -> { // Loading state
                 CircularProgressIndicator()
                 Text("Calculating usage...", modifier = Modifier.padding(top = 16.dp))
@@ -97,27 +125,11 @@ fun UsageScreen() {
                 if (apps.isEmpty()) {
                     Text("No application usage data found.")
                 } else {
-                    // Re-sort the list based on the selected chart type.
-                    val sortedApps = remember(apps, chartType) {
-                        apps.sortedByDescending { app ->
-                            when (chartType) {
-                                ChartType.DAILY -> app.totalTimeInForeground
-                                ChartType.HOURLY -> app.hourlyUsageEvents.sumOf { it.second - it.first }
-                                ChartType.TODAY -> {
-                                    val todayStart = getDayStart(System.currentTimeMillis())
-                                    app.hourlyUsageEvents
-                                        .filter { (start, end) -> end > todayStart && start < System.currentTimeMillis() }
-                                        .sumOf { (start, end) -> end - max(todayStart, start) }
-                                }
-                            }
-                        }
-                    }
-
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        items(sortedApps) { app ->
+                        items(apps) { app ->
                             AppUsageCard(app = app, chartType = chartType)
                         }
                     }
@@ -126,6 +138,8 @@ fun UsageScreen() {
         }
     }
 }
+
+// AppUsageCard and other composables in this file remain the same...
 
 @Composable
 fun AppUsageCard(app: AppUsageInfo, chartType: ChartType) {
@@ -295,7 +309,7 @@ fun DailyUsageBarChart(dailyUsage: Map<Long, Long>) {
 }
 
 
-private fun getDayStart(timestamp: Long): Long {
+internal fun getDayStart(timestamp: Long): Long {
     return Calendar.getInstance().apply {
         timeInMillis = timestamp
         set(Calendar.HOUR_OF_DAY, 0)
@@ -358,7 +372,6 @@ fun HourlyUsageTimelineChart(
         val timelineHeight = 30.dp.toPx()
         val tickHeight = 5.dp.toPx()
 
-        // ** FIX: The scaling duration should always be a full 24 hours. **
         val scaleDuration = (24 * 60 * 60 * 1000).toFloat()
 
         // 1. Calculate responsive label step
@@ -438,7 +451,7 @@ fun HourlyUsageTimelineChart(
 /**
  * Queries the UsageStatsManager to get app usage for the last 7 days AND granular events for the last 24 hours.
  */
-private fun getAppUsageStats(context: Context): List<AppUsageInfo> {
+internal fun getAppUsageStats(context: Context): List<AppUsageInfo> {
     val pm: PackageManager = context.packageManager
     val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
 

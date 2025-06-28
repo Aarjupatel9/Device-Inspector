@@ -24,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.deviceinspector.data.AppEventInfo
 import com.example.deviceinspector.ui.components.GenericScreen
@@ -32,22 +31,43 @@ import com.example.deviceinspector.ui.components.InfoRow
 import com.example.deviceinspector.util.formatTimestamp
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryScreen() {
-    val context = LocalContext.current
-    val historyState = produceState<List<AppEventInfo>?>(initialValue = null) {
-        value = getAppLaunchHistory(context)
-    }
+fun HistoryScreen(
+    events: List<AppEventInfo>?,
+    selectedDurationMillis: Long,
+    onDurationChange: (Long) -> Unit
+) {
+    val durationOptions = mapOf(
+        "Last 4h" to 4 * 60 * 60 * 1000L,
+        "Last 24h" to 24 * 60 * 60 * 1000L,
+        "Last 48h" to 48 * 60 * 60 * 1000L
+    )
+    val optionsList = durationOptions.keys.toList()
 
-    GenericScreen("Launch History (Last 48h)") {
-        when (val events = historyState.value) {
+    GenericScreen("Launch History") {
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            optionsList.forEachIndexed { index, label ->
+                val duration = durationOptions.getValue(label)
+                SegmentedButton(
+                    shape = SegmentedButtonDefaults.itemShape(index = index, count = optionsList.size),
+                    onClick = { onDurationChange(duration) },
+                    selected = (selectedDurationMillis == duration)
+                ) {
+                    Text(label)
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+
+        when (events) {
             null -> { // Loading state
                 CircularProgressIndicator()
                 Text("Loading launch history...", modifier = Modifier.padding(top = 16.dp))
             }
             else -> {
                 if (events.isEmpty()) {
-                    Text("No app launch events found in the last 48 hours.")
+                    Text("No app launch events found in this period.")
                 } else {
                     LazyColumn(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -118,13 +138,13 @@ fun AppEventCard(event: AppEventInfo) {
 }
 
 /**
- * Queries the UsageStatsManager for app launch events in the last 48 hours.
+ * Queries the UsageStatsManager for app launch events in the specified duration.
  */
-private fun getAppLaunchHistory(context: Context): List<AppEventInfo> {
+internal fun getAppLaunchHistory(context: Context, durationMillis: Long): List<AppEventInfo> {
     val pm: PackageManager = context.packageManager
     val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
     val endTime = System.currentTimeMillis()
-    val startTime = endTime - (48 * 60 * 60 * 1000) // 48 hours ago
+    val startTime = endTime - durationMillis
 
     val usageEvents = usageStatsManager.queryEvents(startTime, endTime)
     val appEventList = mutableListOf<AppEventInfo>()

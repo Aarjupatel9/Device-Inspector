@@ -1,5 +1,6 @@
 /*
  * This file contains the UI and logic for the Security screen.
+ * It now receives its data as a parameter to prevent re-fetching on tab switch.
  * Location: app/src/main/java/com/example/deviceinspector/ui/screens/SecurityScreen.kt
  */
 package com.example.deviceinspector.ui.screens
@@ -33,38 +34,30 @@ import com.example.deviceinspector.util.getInstallerName
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
 
 @Composable
-fun SecurityScreen() {
-    val context = LocalContext.current
-    var hiddenApps by remember { mutableStateOf<List<HiddenAppInfo>?>(null) }
-    var refreshTrigger by remember { mutableStateOf(0) }
-
+fun SecurityScreen(
+    hiddenApps: List<HiddenAppInfo>?,
+    onRefresh: () -> Unit
+) {
     // This launcher starts the settings activity. When the user returns,
-    // it triggers a refresh of the app list.
+    // it triggers a refresh of the app list via the onRefresh callback.
     val settingsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
-        // Increment the trigger to cause the LaunchedEffect to re-run
-        refreshTrigger++
-    }
-
-    // This effect runs once initially and then again whenever refreshTrigger changes.
-    LaunchedEffect(refreshTrigger) {
-        hiddenApps = null // Show loading indicator
-        hiddenApps = findHiddenApps(context)
+        onRefresh()
     }
 
     GenericScreen("Hidden Apps Detector") {
-        when (val apps = hiddenApps) {
+        when (hiddenApps) {
             null -> { // Loading state
                 CircularProgressIndicator()
                 Text("Scanning for hidden apps...", modifier = Modifier.padding(top = 16.dp))
             }
             else -> {
-                if (apps.isEmpty()) {
+                if (hiddenApps.isEmpty()) {
                     Text("No hidden applications found. All installed apps have a launcher icon.")
                 } else {
                     Text(
-                        "Found ${apps.size} app(s) without a launcher icon:",
+                        "Found ${hiddenApps.size} app(s) without a launcher icon:",
                         style = MaterialTheme.typography.titleMedium,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
@@ -72,7 +65,7 @@ fun SecurityScreen() {
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        items(apps) { app ->
+                        items(hiddenApps) { app ->
                             HiddenAppCard(app = app) {
                                 // Intent to open the app's settings page
                                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
@@ -131,7 +124,7 @@ fun HiddenAppCard(app: HiddenAppInfo, onDetailsClick: () -> Unit) {
  * Finds installed applications that do not have a main launcher activity.
  * @return A list of `HiddenAppInfo` objects with detailed information.
  */
-private fun findHiddenApps(context: Context): List<HiddenAppInfo> {
+internal fun findHiddenApps(context: Context): List<HiddenAppInfo> {
     val pm: PackageManager = context.packageManager
     val allApps: List<ApplicationInfo> = pm.getInstalledApplications(PackageManager.GET_META_DATA)
     val hiddenApps = mutableListOf<HiddenAppInfo>()
