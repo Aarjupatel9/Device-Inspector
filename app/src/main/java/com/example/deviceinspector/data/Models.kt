@@ -21,16 +21,56 @@ data class AppUsageInfo(
     val packageName: String,
     val totalTimeInForeground: Long,
     val icon: Drawable?,
-    // New: A map of daily usage (Timestamp of day start -> Milliseconds of usage)
-    val dailyUsage: Map<Long, Long>
+    val dailyUsage: Map<Long, Long>,
+    val hourlyUsageEvents: List<Pair<Long, Long>>
 )
 
 // Data class to hold information for a single app launch event
 data class AppEventInfo(
     val appName: String,
     val packageName: String,
+
     val eventTime: Long,
     val icon: Drawable?,
-    // New: The specific activity that was launched
     val activityName: String?
+)
+
+// --- New Data Classes for Detailed Device Info ---
+
+data class DeviceInfo(
+    val hardware: HardwareInfo,
+    val software: SoftwareInfo,
+    val memory: MemoryInfo,
+    val display: DisplayInfo
+)
+
+data class HardwareInfo(
+    val model: String,
+    val manufacturer: String,
+    val brand: String,
+    val device: String,
+    val product: String,
+    val hardware: String,
+    val cpuAbi: String
+)
+
+data class SoftwareInfo(
+    val androidVersion: String,
+    val apiLevel: String,
+    val securityPatch: String,
+    val buildId: String,
+    val kernelVersion: String
+)
+
+data class MemoryInfo(
+    val totalRam: String,
+    val availableRam: String,
+    val totalInternalStorage: String,
+    val availableInternalStorage: String
+)
+
+data class DisplayInfo(
+    val resolution: String,
+    val density: String,
+    val refreshRate: String
 )

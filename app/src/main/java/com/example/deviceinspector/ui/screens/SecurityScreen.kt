@@ -4,6 +4,7 @@
  */
 package com.example.deviceinspector.ui.screens
 
+import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -11,13 +12,14 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.produceState
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -29,17 +31,30 @@ import com.example.deviceinspector.ui.components.InfoRow
 import com.example.deviceinspector.util.formatTimestamp
 import com.example.deviceinspector.util.getInstallerName
 import com.google.accompanist.drawablepainter.rememberDrawablePainter
-import android.app.usage.UsageStatsManager
 
 @Composable
 fun SecurityScreen() {
     val context = LocalContext.current
-    val hiddenAppsState = produceState<List<HiddenAppInfo>?>(initialValue = null) {
-        value = findHiddenApps(context)
+    var hiddenApps by remember { mutableStateOf<List<HiddenAppInfo>?>(null) }
+    var refreshTrigger by remember { mutableStateOf(0) }
+
+    // This launcher starts the settings activity. When the user returns,
+    // it triggers a refresh of the app list.
+    val settingsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        // Increment the trigger to cause the LaunchedEffect to re-run
+        refreshTrigger++
+    }
+
+    // This effect runs once initially and then again whenever refreshTrigger changes.
+    LaunchedEffect(refreshTrigger) {
+        hiddenApps = null // Show loading indicator
+        hiddenApps = findHiddenApps(context)
     }
 
     GenericScreen("Hidden Apps Detector") {
-        when (val apps = hiddenAppsState.value) {
+        when (val apps = hiddenApps) {
             null -> { // Loading state
                 CircularProgressIndicator()
                 Text("Scanning for hidden apps...", modifier = Modifier.padding(top = 16.dp))
@@ -59,9 +74,11 @@ fun SecurityScreen() {
                     ) {
                         items(apps) { app ->
                             HiddenAppCard(app = app) {
+                                // Intent to open the app's settings page
                                 val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                                 intent.data = Uri.fromParts("package", app.packageName, null)
-                                context.startActivity(intent)
+                                // Use the launcher to start the activity
+                                settingsLauncher.launch(intent)
                             }
                         }
                     }
@@ -95,11 +112,15 @@ fun HiddenAppCard(app: HiddenAppInfo, onDetailsClick: () -> Unit) {
             InfoRow("Last Used:", formatTimestamp(app.lastTimeUsed))
             InfoRow("Installer:", getInstallerName(app.installerPackage))
             Spacer(modifier = Modifier.height(16.dp))
-            Button(
-                onClick = onDetailsClick,
-                modifier = Modifier.align(Alignment.End)
+
+            // By placing the Button inside a Row with Arrangement.End, it's pushed to the far right.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
             ) {
-                Text("Details / Uninstall")
+                Button(onClick = onDetailsClick) {
+                    Text("Details / Uninstall")
+                }
             }
         }
     }
