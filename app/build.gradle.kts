@@ -10,7 +10,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.deviceinspector"
+    namespace = "com.mhk.deviceinspector"
     compileSdk = 34 // Updated to latest stable SDK
 
     defaultConfig {
