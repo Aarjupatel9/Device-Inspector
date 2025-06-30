@@ -80,6 +80,8 @@ dependencies {
     implementation("com.google.accompanist:accompanist-systemuicontroller:0.34.0")
     implementation("com.google.accompanist:accompanist-drawablepainter:0.34.0")
 
+    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
+
     // Testing - Updated to latest versions
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.0")

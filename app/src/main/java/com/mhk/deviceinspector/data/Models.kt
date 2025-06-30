@@ -1,6 +1,6 @@
 /*
  * This file contains the data models for the application.
- * Location: app/src/main/java/com/example/deviceinspector/data/Models.kt
+ * Location: app/src/main/java/com/mhk/deviceinspector/data/Models.kt
  */
 package com.mhk.deviceinspector.data
 
@@ -29,14 +29,47 @@ data class AppUsageInfo(
 data class AppEventInfo(
     val appName: String,
     val packageName: String,
-
     val eventTime: Long,
     val icon: Drawable?,
     val activityName: String?
 )
 
-// --- New Data Classes for Detailed Device Info ---
+// Data class for the Dangerous Permissions screen
+data class PermissionAppInfo(
+    val appName: String,
+    val packageName: String,
+    val icon: Drawable?,
+    val permissions: List<String>
+)
 
+// Data class for an app with a special type of access
+data class SpecialAccessApp(
+    val appName: String,
+    val packageName: String,
+    val icon: Drawable?,
+    val description: String
+)
+
+// Container for all types of special access apps
+data class AllSpecialAccessApps(
+    val deviceAdmins: List<SpecialAccessApp>,
+    val accessibilityServices: List<SpecialAccessApp>,
+    val drawOverApps: List<SpecialAccessApp>
+)
+
+// Data class for a single captured network connection
+data class NetworkConnectionInfo(
+    val appName: String,
+    val packageName: String,
+    val icon: Drawable?,
+    val remoteAddress: String,
+    val remotePort: Int,
+    val protocol: String,
+    val timestamp: Long
+)
+
+
+// Data classes for Detailed Device Info
 data class DeviceInfo(
     val hardware: HardwareInfo,
     val software: SoftwareInfo,

@@ -1,9 +1,9 @@
 /*
  * This file contains the UI and logic for the Security screen.
  * It now receives its data as a parameter to prevent re-fetching on tab switch.
- * Location: app/src/main/java/com/example/deviceinspector/ui/screens/SecurityScreen.kt
+ * Location: app/src/main/java/com/mhk/deviceinspector/ui/screens/security/SecurityScreen.kt
  */
-package com.mhk.deviceinspector.ui.screens
+package com.mhk.deviceinspector.ui.screens.security
 
 import android.app.usage.UsageStatsManager
 import android.content.Context
@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.navigation.NavController
 import com.mhk.deviceinspector.data.HiddenAppInfo
 import com.mhk.deviceinspector.ui.components.GenericScreen
 import com.mhk.deviceinspector.ui.components.InfoRow
@@ -35,7 +36,8 @@ import com.google.accompanist.drawablepainter.rememberDrawablePainter
 @Composable
 fun SecurityScreen(
     hiddenApps: List<HiddenAppInfo>?,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    navController: NavController
 ) {
     // This launcher starts the settings activity. When the user returns,
     // it triggers a refresh of the app list via the onRefresh callback.
@@ -45,7 +47,7 @@ fun SecurityScreen(
         onRefresh()
     }
 
-    GenericScreen("Hidden Apps Detector") {
+    GenericScreen("Hidden Apps Detector", navController = navController) {
         when (hiddenApps) {
             null -> { // Loading state
                 CircularProgressIndicator()
@@ -131,8 +133,12 @@ internal fun findHiddenApps(context: Context): List<HiddenAppInfo> {
     val usageStatsManager = context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
     val twoYearsInMillis = 2L * 365 * 24 * 60 * 60 * 1000
     val startTime = System.currentTimeMillis() - twoYearsInMillis
-    val usageStats = usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_YEARLY, startTime, System.currentTimeMillis())
-    val usageStatsMap = usageStats.associateBy({ it.packageName }, { it.lastTimeUsed })
+    val usageStatsList = try {
+        usageStatsManager.queryUsageStats(UsageStatsManager.INTERVAL_YEARLY, startTime, System.currentTimeMillis())
+    } catch (e: SecurityException) {
+        return emptyList()
+    }
+    val usageStatsMap = usageStatsList.associateBy({ it.packageName }, { it.lastTimeUsed })
 
     for (appInfo in allApps) {
         if (appInfo.flags and ApplicationInfo.FLAG_SYSTEM == 0) {

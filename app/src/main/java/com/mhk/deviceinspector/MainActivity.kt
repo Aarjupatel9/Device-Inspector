@@ -1,3 +1,8 @@
+/*
+ * This file is the main entry point of the application and handles navigation.
+ * It now manages the state for all screens to prevent re-loading on tab switch.
+ * Location: app/src/main/java/com/mhk/deviceinspector/MainActivity.kt
+ */
 package com.mhk.deviceinspector
 
 import android.app.AppOpsManager
@@ -23,21 +28,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.*
-import com.google.accompanist.systemuicontroller.rememberSystemUiController
-import com.mhk.deviceinspector.data.AppEventInfo
-import com.mhk.deviceinspector.data.AppUsageInfo
-import com.mhk.deviceinspector.data.DeviceInfo
-import com.mhk.deviceinspector.data.HiddenAppInfo
+import com.mhk.deviceinspector.data.*
 import com.mhk.deviceinspector.ui.components.PermissionRequestScreen
-import com.mhk.deviceinspector.ui.screens.DeviceInfoScreen
-import com.mhk.deviceinspector.ui.screens.HistoryScreen
-import com.mhk.deviceinspector.ui.screens.SecurityScreen
-import com.mhk.deviceinspector.ui.screens.UsageScreen
-import com.mhk.deviceinspector.ui.screens.findHiddenApps
-import com.mhk.deviceinspector.ui.screens.getAppLaunchHistory
-import com.mhk.deviceinspector.ui.screens.getAppUsageStats
-import com.mhk.deviceinspector.ui.screens.getDetailedDeviceInfo
+import com.mhk.deviceinspector.ui.screens.*
+import com.mhk.deviceinspector.ui.screens.security.*
 import com.mhk.deviceinspector.ui.theme.DeviceInspectorTheme
+import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -72,22 +68,26 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object Usage : Screen("usage", "Usage", Icons.Default.PieChart)
     object History : Screen("history", "History", Icons.Default.History)
     object DeviceInfo : Screen("device_info", "Device Info", Icons.Default.Info)
-    object Security : Screen("security", "Security", Icons.Default.Security)
+
+    // Updated Security Section Routes
+    object SecurityHub : Screen("security_hub", "Security", Icons.Default.Security)
+    object HiddenApps : Screen("hidden_apps", "Hidden Apps", Icons.Default.VisibilityOff)
+    object DangerousPermissions : Screen("dangerous_permissions", "Dangerous Permissions", Icons.Default.VpnKey)
+    object SpecialAccess : Screen("special_access", "Special Access", Icons.Default.VpnLock)
+    object NetworkMonitor : Screen("network_monitor", "Network Monitor", Icons.Default.Public)
+    object AppComponents : Screen("app_components", "App Components", Icons.Default.Extension)
 }
 
-val navItems = listOf(Screen.Usage, Screen.History, Screen.DeviceInfo, Screen.Security)
+val navItems = listOf(Screen.Usage, Screen.History, Screen.DeviceInfo, Screen.SecurityHub)
 
 @Composable
 fun MainApp() {
     val context = LocalContext.current
     var hasUsageStatsPermission by remember { mutableStateOf(hasUsageStatsPermission(context)) }
 
-    // This launcher opens the settings screen. When the user returns,
-    // its callback is fired, where we re-check the permission state.
     val usageSettingsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
-        // Update the permission state when the user returns from settings
         hasUsageStatsPermission = hasUsageStatsPermission(context)
     }
 
@@ -95,7 +95,6 @@ fun MainApp() {
         AppWithNavigation()
     } else {
         PermissionRequestScreen {
-            // Launch the settings screen using the launcher
             usageSettingsLauncher.launch(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
         }
     }
@@ -112,15 +111,19 @@ fun AppWithNavigation() {
     var historyInfo by remember { mutableStateOf<List<AppEventInfo>?>(null) }
     var securityInfo by remember { mutableStateOf<List<HiddenAppInfo>?>(null) }
     var deviceInfo by remember { mutableStateOf<DeviceInfo?>(null) }
-    // Add state for the history time filter, default to 4 hours
+    var permissionsInfo by remember { mutableStateOf<List<PermissionAppInfo>?>(null) }
+    var specialAccessInfo by remember { mutableStateOf<AllSpecialAccessApps?>(null) }
+
+
     var historyFilterMillis by remember { mutableStateOf(4 * 60 * 60 * 1000L) }
 
-
-    // This effect runs only once, fetching initial data
+    // This effect runs only once, fetching all data in parallel background threads.
     LaunchedEffect(Unit) {
         launch(Dispatchers.IO) { usageInfo = getAppUsageStats(context) }
         launch(Dispatchers.IO) { securityInfo = findHiddenApps(context) }
         launch(Dispatchers.IO) { deviceInfo = getDetailedDeviceInfo(context) }
+        launch(Dispatchers.IO) { permissionsInfo = getDangerousPermissionsApps(context) }
+        launch(Dispatchers.IO) { specialAccessInfo = getSpecialAccessApps(context) }
     }
 
     // This effect re-runs ONLY when the history filter changes
@@ -136,21 +139,26 @@ fun AppWithNavigation() {
         AppNavHost(
             navController = navController,
             modifier = Modifier.padding(innerPadding),
-            // Pass the data down to the screens
             usageInfo = usageInfo,
             historyInfo = historyInfo,
             deviceInfo = deviceInfo,
             securityInfo = securityInfo,
+            permissionsInfo = permissionsInfo,
+            specialAccessInfo = specialAccessInfo,
             selectedHistoryDuration = historyFilterMillis,
-            // Provide a lambda to allow the history screen to change the filter
             onHistoryDurationChange = { newDuration ->
                 historyFilterMillis = newDuration
             },
-            // Provide a lambda to allow the security screen to trigger a refresh
             onRefreshSecurityInfo = {
                 coroutineScope.launch(Dispatchers.IO) {
                     securityInfo = null // Show loader
                     securityInfo = findHiddenApps(context)
+                }
+            },
+            onRefreshSpecialAccessInfo = {
+                coroutineScope.launch(Dispatchers.IO) {
+                    specialAccessInfo = null // Show loader
+                    specialAccessInfo = getSpecialAccessApps(context)
                 }
             }
         )
@@ -166,7 +174,7 @@ fun AppBottomNavigation(navController: NavHostController) {
             NavigationBarItem(
                 icon = { Icon(screen.icon, contentDescription = screen.label) },
                 label = { Text(screen.label) },
-                selected = currentRoute == screen.route,
+                selected = currentRoute?.startsWith(screen.route.substringBefore("_")) ?: false,
                 onClick = {
                     navController.navigate(screen.route) {
                         popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -187,15 +195,33 @@ fun AppNavHost(
     historyInfo: List<AppEventInfo>?,
     deviceInfo: DeviceInfo?,
     securityInfo: List<HiddenAppInfo>?,
+    permissionsInfo: List<PermissionAppInfo>?,
+    specialAccessInfo: AllSpecialAccessApps?,
     selectedHistoryDuration: Long,
     onHistoryDurationChange: (Long) -> Unit,
-    onRefreshSecurityInfo: () -> Unit
+    onRefreshSecurityInfo: () -> Unit,
+    onRefreshSpecialAccessInfo: () -> Unit
 ) {
     NavHost(navController, startDestination = Screen.Usage.route, modifier = modifier) {
         composable(Screen.Usage.route) { UsageScreen(usageInfo) }
         composable(Screen.History.route) { HistoryScreen(historyInfo, selectedHistoryDuration, onHistoryDurationChange) }
         composable(Screen.DeviceInfo.route) { DeviceInfoScreen(deviceInfo) }
-        composable(Screen.Security.route) { SecurityScreen(securityInfo, onRefreshSecurityInfo) }
+
+        // New Security Navigation
+        composable(Screen.SecurityHub.route) { SecurityHubScreen(navController) }
+        composable(Screen.HiddenApps.route) { SecurityScreen(securityInfo, onRefreshSecurityInfo, navController) }
+        composable(Screen.DangerousPermissions.route) { DangerousPermissionsScreen(permissionsInfo, navController) }
+        composable(Screen.SpecialAccess.route) { SpecialAccessScreen(specialAccessInfo, onRefreshSpecialAccessInfo, navController) }
+        composable(Screen.NetworkMonitor.route) { NetworkMonitorScreen(navController) }
+
+        // Add routes for the "Coming Soon" screens
+        composable(Screen.AppComponents.route) {
+            ComingSoonScreen(
+                navController = navController,
+                featureName = Screen.AppComponents.label,
+                featureIcon = Screen.AppComponents.icon
+            )
+        }
     }
 }
 
