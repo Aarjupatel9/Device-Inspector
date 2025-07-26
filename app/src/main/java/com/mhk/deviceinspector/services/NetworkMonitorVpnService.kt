@@ -5,9 +5,12 @@
 package com.mhk.deviceinspector.services
 
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.drawable.Drawable
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import com.mhk.deviceinspector.data.NetworkConnectionInfo
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.InetAddress
@@ -61,31 +64,72 @@ class NetworkMonitorVpnService : VpnService() {
                     val length = fileInputStream.read(packet.array())
                     if (length > 0) {
                         packet.limit(length)
-                        parsePacket(packet)
-                        // In a real firewall, you would write the packet to the output stream.
-                        // For monitoring, we just analyze and drop it.
+                        parsePacketAndBroadcast(packet, length)
                         packet.clear()
                     }
                 } catch (e: Exception) {
-                    // Handle exceptions
+                    // VPN service was likely stopped.
                 }
             }
         }
     }
 
-    private fun parsePacket(packet: ByteBuffer) {
+    private fun parsePacketAndBroadcast(packet: ByteBuffer, packetSize: Int) {
+        // THIS IS A SIMPLIFIED IMPLEMENTATION
+        // A real implementation would require a full TCP/IP stack parser.
+        // The following code is a placeholder to demonstrate the concept.
+
         val ipVersion = packet.get().toInt() shr 4
         if (ipVersion != 4) return // Only handle IPv4 for simplicity
 
         packet.position(0)
         val headerLength = (packet.get(0).toInt() and 0x0F) * 4
-        val protocol = packet.get(9).toInt() and 0xFF
-        val sourceAddress = InetAddress.getByAddress(ByteArray(4).apply { packet.position(12); packet.get(this) })
-        val destAddress = InetAddress.getByAddress(ByteArray(4).apply { packet.position(16); packet.get(this) })
+        val protocolNumber = packet.get(9).toInt() and 0xFF
+        val protocol = when (protocolNumber) {
+            6 -> "TCP"
+            17 -> "UDP"
+            else -> "OTHER"
+        }
 
-        // This is a simplification. A real implementation would need to look up the app
-        // associated with the source port, which is complex.
-        val connectionInfo = "Proto: $protocol, Src: ${sourceAddress.hostAddress}, Dst: ${destAddress.hostAddress}"
+        val sourceIp = InetAddress.getByAddress(ByteArray(4).apply { packet.position(12); packet.get(this) })
+        val destIp = InetAddress.getByAddress(ByteArray(4).apply { packet.position(16); packet.get(this) })
+
+        // Placeholder for port parsing
+        val sourcePort = if (protocol == "TCP" || protocol == "UDP") {
+            packet.getShort(headerLength).toInt() and 0xFFFF
+        } else 0
+        val destPort = if (protocol == "TCP" || protocol == "UDP") {
+            packet.getShort(headerLength + 2).toInt() and 0xFFFF
+        } else 0
+
+
+        // Placeholder for app identification. A real implementation would use ConnectionManager
+        // or read from /proc/net, which is complex and requires root on newer Android.
+        val packageName = "com.example.unknownapp"
+        var appName: String
+        var icon: Drawable?
+
+        try {
+            val appInfo = packageManager.getApplicationInfo(packageName, 0)
+            appName = appInfo.loadLabel(packageManager).toString()
+            icon = appInfo.loadIcon(packageManager)
+        } catch (e: PackageManager.NameNotFoundException) {
+            appName = "Unknown App"
+            icon = null
+        }
+
+        val connectionInfo = NetworkConnectionInfo(
+            appName = appName,
+            packageName = packageName,
+            icon = icon,
+            sourceAddress = sourceIp.hostAddress ?: "N/A",
+            sourcePort = sourcePort,
+            destinationAddress = destIp.hostAddress ?: "N/A",
+            destinationPort = destPort,
+            protocol = protocol,
+            packetSize = packetSize,
+            timestamp = System.currentTimeMillis()
+        )
 
         // Broadcast the connection info to the UI
         val intent = Intent(BROADCAST_ACTION_CONNECTION).apply {

@@ -13,6 +13,7 @@ import android.net.VpnService
 import android.os.Environment
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,10 +28,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.localbroadcastmanager.content.LocalBroadcastManager
 import androidx.navigation.NavController
+import com.mhk.deviceinspector.data.NetworkConnectionInfo
+import com.mhk.deviceinspector.data.NetworkSession
 import com.mhk.deviceinspector.services.NetworkMonitorVpnService
 import com.mhk.deviceinspector.ui.components.GenericScreen
 import com.mhk.deviceinspector.util.formatTimestamp
 import com.mhk.deviceinspector.util.StoragePermissionHelper
+import com.google.accompanist.drawablepainter.rememberDrawablePainter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,24 +44,6 @@ import java.io.File
 import java.io.FileWriter
 import java.text.SimpleDateFormat
 import java.util.*
-
-// Data models for session logging
-data class NetworkSession(
-    val sessionId: String,
-    val startTime: Long,
-    val endTime: Long?,
-    val connections: MutableList<NetworkLogEntry> = mutableListOf()
-)
-
-data class NetworkLogEntry(
-    val timestamp: Long,
-    val protocol: String,
-    val sourceAddress: String,
-    val destinationAddress: String,
-    val sourcePort: Int?,
-    val destinationPort: Int?,
-    val connectionInfo: String
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -69,11 +55,11 @@ fun NetworkMonitorScreen(navController: NavController) {
     var currentSession by remember { mutableStateOf<NetworkSession?>(null) }
     var sessions by remember { mutableStateOf<List<NetworkSession>>(emptyList()) }
     var isExporting by remember { mutableStateOf(false) }
-    var showExportDialog by remember { mutableStateOf(false) }
+    var sessionToExport by remember { mutableStateOf<NetworkSession?>(null) }
     var exportMessage by remember { mutableStateOf("") }
 
     // Real-time connections for current session
-    val connections = remember { mutableStateListOf<String>() }
+    val connections = remember { mutableStateListOf<NetworkConnectionInfo>() }
 
     // Load existing sessions on startup
     LaunchedEffect(Unit) {
@@ -84,20 +70,25 @@ fun NetworkMonitorScreen(navController: NavController) {
     val connectionReceiver = remember {
         object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                intent?.getStringExtra(NetworkMonitorVpnService.EXTRA_CONNECTION_INFO)?.let { connectionInfo ->
+                intent?.getParcelableExtra<NetworkConnectionInfo>(NetworkMonitorVpnService.EXTRA_CONNECTION_INFO)?.let { connectionInfo ->
                     connections.add(0, connectionInfo)
 
-                    // Add to current session if active
+                    // Create a new session object to trigger recomposition for the active session card
                     currentSession?.let { session ->
-                        val logEntry = parseConnectionInfo(connectionInfo)
-                        session.connections.add(logEntry)
+                        val updatedConnections = session.connections.toMutableList().apply { add(connectionInfo) }
+                        currentSession = session.copy(connections = updatedConnections)
+                    }
 
-                        // Auto-save session periodically (every 10 connections)
-                        if (session.connections.size % 10 == 0) {
-                            context?.let { ctx ->
-                                coroutineScope.launch {
-                                    saveSession(ctx, session)
-                                }
+                    // Enforce the 100 item limit for the real-time view
+                    if (connections.size > 100) {
+                        connections.removeLast()
+                    }
+
+                    // Auto-save session periodically (every 10 connections)
+                    if (currentSession?.connections?.size?.rem(10) == 0) {
+                        context?.let { ctx ->
+                            coroutineScope.launch {
+                                currentSession?.let { saveSession(ctx, it) }
                             }
                         }
                     }
@@ -132,7 +123,6 @@ fun NetworkMonitorScreen(navController: NavController) {
     val storagePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
-        // Check if permission was granted after returning from settings
         // The actual export will be triggered again by the user
     }
 
@@ -142,74 +132,43 @@ fun NetworkMonitorScreen(navController: NavController) {
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Control buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        if (isVpnRunning) {
-                            stopMonitoring(context) { session ->
-                                currentSession?.let {
-                                    coroutineScope.launch {
-                                        val completedSession = it.copy(endTime = System.currentTimeMillis())
-                                        saveSession(context, completedSession)
-                                        sessions = sessions + completedSession
-                                    }
-                                }
-                                currentSession = null
-                                isVpnRunning = false
-                            }
-                        } else {
-                            val vpnPrepareIntent = VpnService.prepare(context)
-                            if (vpnPrepareIntent != null) {
-                                vpnPermissionLauncher.launch(vpnPrepareIntent)
-                            } else {
-                                startMonitoring(context) { session ->
-                                    currentSession = session
-                                    isVpnRunning = true
-                                    connections.clear()
+            Button(
+                onClick = {
+                    if (isVpnRunning) {
+                        stopMonitoring(context) {
+                            currentSession?.let {
+                                coroutineScope.launch {
+                                    val completedSession = it.copy(endTime = System.currentTimeMillis())
+                                    saveSession(context, completedSession)
+                                    sessions = sessions + completedSession
                                 }
                             }
+                            currentSession = null
+                            isVpnRunning = false
                         }
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(
-                        imageVector = if (isVpnRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
-                        contentDescription = null
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(if (isVpnRunning) "Stop Session" else "Start Session")
-                }
-
-                Button(
-                    onClick = {
-                        // Check storage permission before showing export dialog
-                        if (StoragePermissionHelper.hasStoragePermission(context)) {
-                            showExportDialog = true
-                        } else {
-                            StoragePermissionHelper.requestStoragePermission(context, storagePermissionLauncher)
-                        }
-                    },
-                    enabled = sessions.isNotEmpty() && !isExporting,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    if (isExporting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
                     } else {
-                        Icon(
-                            imageVector = Icons.Default.Download,
-                            contentDescription = null
-                        )
+                        val vpnPrepareIntent = VpnService.prepare(context)
+                        if (vpnPrepareIntent != null) {
+                            vpnPermissionLauncher.launch(vpnPrepareIntent)
+                        } else {
+                            startMonitoring(context) { session ->
+                                currentSession = session
+                                isVpnRunning = true
+                                connections.clear()
+                            }
+                        }
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Export JSON")
-                }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = if (isVpnRunning) Icons.Default.Stop else Icons.Default.PlayArrow,
+                    contentDescription = null
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(if (isVpnRunning) "Stop Session" else "Start Session")
             }
+
 
             Spacer(modifier = Modifier.height(16.dp))
 
@@ -229,7 +188,7 @@ fun NetworkMonitorScreen(navController: NavController) {
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
-                        Text("Session ID: ${session.sessionId}")
+                        Text("Session ID: ${session.sessionId.take(8)}...")
                         Text("Started: ${formatTimestamp(session.startTime)}")
                         Text("Connections Logged: ${session.connections.size}")
                     }
@@ -258,11 +217,20 @@ fun NetworkMonitorScreen(navController: NavController) {
                 0 -> {
                     // Real-time connections
                     if (isVpnRunning) {
-                        Text(
-                            "Monitoring network traffic...",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                "Monitoring network traffic...",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            IconButton(onClick = { connections.clear() }) {
+                                Icon(Icons.Default.DeleteSweep, contentDescription = "Clear real-time log")
+                            }
+                        }
                         Spacer(modifier = Modifier.height(8.dp))
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
                             items(connections) { connectionInfo ->
@@ -295,7 +263,8 @@ fun NetworkMonitorScreen(navController: NavController) {
                                             deleteSession(context, sessionToDelete.sessionId)
                                             sessions = sessions.filter { it.sessionId != sessionToDelete.sessionId }
                                         }
-                                    }
+                                    },
+                                    onExport = { sessionToExport = it }
                                 )
                             }
                         }
@@ -305,14 +274,14 @@ fun NetworkMonitorScreen(navController: NavController) {
         }
     }
 
-    // Export dialog
-    if (showExportDialog) {
+    // Export dialog for a single session
+    if (sessionToExport != null) {
         AlertDialog(
-            onDismissRequest = { showExportDialog = false },
-            title = { Text("Export Session Logs") },
+            onDismissRequest = { sessionToExport = null },
+            title = { Text("Export Session") },
             text = {
                 Column {
-                    Text("Export ${sessions.size} network sessions to JSON file?")
+                    Text("Export session ${sessionToExport?.sessionId?.take(8)}... to a JSON file?")
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         "File will be saved to: ${StoragePermissionHelper.getExportPathForDisplay()}",
@@ -334,22 +303,25 @@ fun NetworkMonitorScreen(navController: NavController) {
             confirmButton = {
                 Button(
                     onClick = {
-                        isExporting = true
-                        coroutineScope.launch {
-                            try {
-                                val result = exportSessionsToJson(context, sessions)
-                                exportMessage = result
-                                if (result.contains("Success")) {
-                                    // Auto-close dialog after 2 seconds on success
-                                    kotlinx.coroutines.delay(2000)
-                                    showExportDialog = false
-                                    exportMessage = ""
+                        if (StoragePermissionHelper.hasStoragePermission(context)) {
+                            isExporting = true
+                            coroutineScope.launch {
+                                try {
+                                    val result = exportSingleSessionToJson(context, sessionToExport!!)
+                                    exportMessage = result
+                                    if (result.contains("Success")) {
+                                        kotlinx.coroutines.delay(2000)
+                                        sessionToExport = null
+                                        exportMessage = ""
+                                    }
+                                } catch (e: Exception) {
+                                    exportMessage = "Export failed: ${e.message}"
+                                } finally {
+                                    isExporting = false
                                 }
-                            } catch (e: Exception) {
-                                exportMessage = "Export failed: ${e.message}"
-                            } finally {
-                                isExporting = false
                             }
+                        } else {
+                            StoragePermissionHelper.requestStoragePermission(context, storagePermissionLauncher)
                         }
                     },
                     enabled = !isExporting
@@ -367,7 +339,7 @@ fun NetworkMonitorScreen(navController: NavController) {
             dismissButton = {
                 TextButton(
                     onClick = {
-                        showExportDialog = false
+                        sessionToExport = null
                         exportMessage = ""
                     }
                 ) {
@@ -379,18 +351,35 @@ fun NetworkMonitorScreen(navController: NavController) {
 }
 
 @Composable
-fun ConnectionInfoCard(info: String) {
+fun ConnectionInfoCard(info: NetworkConnectionInfo) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 4.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Text(
-            text = info,
+        Row(
             modifier = Modifier.padding(12.dp),
-            style = MaterialTheme.typography.bodySmall
-        )
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Image(
+                painter = rememberDrawablePainter(drawable = info.icon),
+                contentDescription = null,
+                modifier = Modifier.size(32.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(info.appName, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "${info.sourceAddress}:${info.sourcePort} -> ${info.destinationAddress}:${info.destinationPort}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Column(horizontalAlignment = Alignment.End) {
+                Text(info.protocol, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text("${info.packetSize} B", style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 
@@ -398,7 +387,8 @@ fun ConnectionInfoCard(info: String) {
 @Composable
 fun SessionCard(
     session: NetworkSession,
-    onDelete: (NetworkSession) -> Unit
+    onDelete: (NetworkSession) -> Unit,
+    onExport: (NetworkSession) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -444,6 +434,13 @@ fun SessionCard(
                     )
                 }
 
+                IconButton(onClick = { onExport(session) }) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "Export session"
+                    )
+                }
+
                 IconButton(onClick = { onDelete(session) }) {
                     Icon(
                         imageVector = Icons.Default.Delete,
@@ -467,7 +464,7 @@ fun SessionCard(
                 // Show first few connections as preview
                 session.connections.take(5).forEach { connection ->
                     Text(
-                        "${formatTimestamp(connection.timestamp)}: ${connection.connectionInfo}",
+                        "${formatTimestamp(connection.timestamp)}: ${connection.appName} -> ${connection.destinationAddress}",
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(start = 8.dp, top = 4.dp)
                     )
@@ -507,23 +504,6 @@ private fun stopMonitoring(context: Context, onSessionStopped: (NetworkSession?)
     })
 
     onSessionStopped(null)
-}
-
-private fun parseConnectionInfo(connectionInfo: String): NetworkLogEntry {
-    // Parse the connection string to extract structured data
-    // This is a simplified parser - you might want to enhance this based on your actual format
-    val parts = connectionInfo.split(", ")
-    val timestamp = System.currentTimeMillis()
-
-    return NetworkLogEntry(
-        timestamp = timestamp,
-        protocol = parts.find { it.startsWith("Proto:") }?.substringAfter("Proto: ") ?: "Unknown",
-        sourceAddress = parts.find { it.startsWith("Src:") }?.substringAfter("Src: ") ?: "Unknown",
-        destinationAddress = parts.find { it.startsWith("Dst:") }?.substringAfter("Dst: ") ?: "Unknown",
-        sourcePort = null, // Extract if available in your format
-        destinationPort = null, // Extract if available in your format
-        connectionInfo = connectionInfo
-    )
 }
 
 private suspend fun saveSession(context: Context, session: NetworkSession) = withContext(Dispatchers.IO) {
@@ -578,35 +558,19 @@ private suspend fun deleteSession(context: Context, sessionId: String) = withCon
     }
 }
 
-private suspend fun exportSessionsToJson(context: Context, sessions: List<NetworkSession>): String = withContext(Dispatchers.IO) {
+private suspend fun exportSingleSessionToJson(context: Context, session: NetworkSession): String = withContext(Dispatchers.IO) {
     try {
-        // Check permission first
         if (!StoragePermissionHelper.hasStoragePermission(context)) {
-            return@withContext "Storage permission not granted. Please grant permission and try again."
+            return@withContext "Storage permission not granted."
         }
 
-        // Create export directory
         val exportDir = StoragePermissionHelper.createExportDirectory()
-            ?: return@withContext "Failed to create export directory. Please check storage permissions."
+            ?: return@withContext "Failed to create export directory."
 
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
-        val exportFile = File(exportDir, "network_sessions_$timestamp.json")
+        val exportFile = File(exportDir, "session_${session.sessionId.take(8)}_$timestamp.json")
 
-        val exportJson = JSONObject().apply {
-            put("exportDate", System.currentTimeMillis())
-            put("exportDateFormatted", SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
-            put("totalSessions", sessions.size)
-            put("totalConnections", sessions.sumOf { it.connections.size })
-            put("deviceInfo", JSONObject().apply {
-                put("appVersion", "1.0")
-                put("exportedBy", "Device Inspector")
-            })
-            put("sessions", JSONArray().apply {
-                sessions.forEach { session ->
-                    put(sessionToJson(session))
-                }
-            })
-        }
+        val exportJson = sessionToJson(session)
 
         FileWriter(exportFile).use { writer ->
             writer.write(exportJson.toString(2))
@@ -628,12 +592,14 @@ private fun sessionToJson(session: NetworkSession): JSONObject {
             session.connections.forEach { connection ->
                 put(JSONObject().apply {
                     put("timestamp", connection.timestamp)
+                    put("appName", connection.appName)
+                    put("packageName", connection.packageName)
                     put("protocol", connection.protocol)
                     put("sourceAddress", connection.sourceAddress)
-                    put("destinationAddress", connection.destinationAddress)
                     put("sourcePort", connection.sourcePort)
+                    put("destinationAddress", connection.destinationAddress)
                     put("destinationPort", connection.destinationPort)
-                    put("connectionInfo", connection.connectionInfo)
+                    put("packetSize", connection.packetSize)
                 })
             }
         })
@@ -641,20 +607,23 @@ private fun sessionToJson(session: NetworkSession): JSONObject {
 }
 
 private fun jsonToSession(json: JSONObject): NetworkSession {
-    val connections = mutableListOf<NetworkLogEntry>()
+    val connections = mutableListOf<NetworkConnectionInfo>()
     val connectionsArray = json.getJSONArray("connections")
 
     for (i in 0 until connectionsArray.length()) {
         val connJson = connectionsArray.getJSONObject(i)
         connections.add(
-            NetworkLogEntry(
+            NetworkConnectionInfo(
                 timestamp = connJson.getLong("timestamp"),
+                appName = connJson.getString("appName"),
+                packageName = connJson.getString("packageName"),
                 protocol = connJson.getString("protocol"),
                 sourceAddress = connJson.getString("sourceAddress"),
+                sourcePort = connJson.getInt("sourcePort"),
                 destinationAddress = connJson.getString("destinationAddress"),
-                sourcePort = if (connJson.isNull("sourcePort")) null else connJson.getInt("sourcePort"),
-                destinationPort = if (connJson.isNull("destinationPort")) null else connJson.getInt("destinationPort"),
-                connectionInfo = connJson.getString("connectionInfo")
+                destinationPort = connJson.getInt("destinationPort"),
+                packetSize = connJson.getInt("packetSize"),
+                icon = null // Icon is not saved in JSON
             )
         )
     }

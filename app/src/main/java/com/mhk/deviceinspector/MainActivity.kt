@@ -70,6 +70,7 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object Usage : Screen("usage", "Usage", Icons.Default.PieChart)
     object History : Screen("history", "History", Icons.Default.History)
     object DeviceInfo : Screen("device_info", "Device Info", Icons.Default.Info)
+    object About : Screen("about", "About", Icons.Default.Info)
 
     // Updated Security Section Routes
     object SecurityHub : Screen("security_hub", "Security", Icons.Default.Security)
@@ -104,6 +105,7 @@ fun MainApp() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppWithNavigation() {
     val context = LocalContext.current
@@ -138,8 +140,17 @@ fun AppWithNavigation() {
         launch(Dispatchers.IO) { historyInfo = getAppLaunchHistory(context, historyFilterMillis) }
     }
 
-
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Device Inspector") }, // Title is now static
+                actions = {
+                    IconButton(onClick = { navController.navigate(Screen.About.route) }) {
+                        Icon(Icons.Default.Info, contentDescription = "About")
+                    }
+                }
+            )
+        },
         bottomBar = { AppBottomNavigation(navController) }
     ) { innerPadding ->
         AppNavHost(
@@ -215,6 +226,7 @@ fun AppNavHost(
         composable(Screen.Usage.route) { UsageScreen(usageInfo) }
         composable(Screen.History.route) { HistoryScreen(historyInfo, selectedHistoryDuration, onHistoryDurationChange) }
         composable(Screen.DeviceInfo.route) { DeviceInfoScreen(deviceInfo) }
+        composable(Screen.About.route) { AboutScreen(navController) }
 
         // New Security Navigation
         composable(Screen.SecurityHub.route) { SecurityHubScreen(navController) }

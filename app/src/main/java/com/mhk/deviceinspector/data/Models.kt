@@ -66,11 +66,22 @@ data class NetworkConnectionInfo(
     val appName: String,
     val packageName: String,
     val icon: @RawValue Drawable?,
-    val remoteAddress: String,
-    val remotePort: Int,
+    val sourceAddress: String,
+    val sourcePort: Int,
+    val destinationAddress: String,
+    val destinationPort: Int,
     val protocol: String,
+    val packetSize: Int,
     val timestamp: Long
 ) : Parcelable
+
+// Data class for a recorded network session
+data class NetworkSession(
+    val sessionId: String,
+    val startTime: Long,
+    val endTime: Long?,
+    val connections: MutableList<NetworkConnectionInfo> = mutableListOf()
+)
 
 // Data class for the app list in the App Components screen
 data class AppComponentInfo(
