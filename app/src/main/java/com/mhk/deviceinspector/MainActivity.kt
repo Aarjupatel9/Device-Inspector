@@ -27,7 +27,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.*
+import androidx.navigation.navArgument
 import com.mhk.deviceinspector.data.*
 import com.mhk.deviceinspector.ui.components.PermissionRequestScreen
 import com.mhk.deviceinspector.ui.screens.*
@@ -76,9 +78,11 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object SpecialAccess : Screen("special_access", "Special Access", Icons.Default.VpnLock)
     object NetworkMonitor : Screen("network_monitor", "Network Monitor", Icons.Default.Public)
     object AppComponents : Screen("app_components", "App Components", Icons.Default.Extension)
+    object AppComponentsDetail : Screen("app_components_detail", "Component Details", Icons.Default.List)
 }
 
-val navItems = listOf(Screen.Usage, Screen.History, Screen.DeviceInfo, Screen.SecurityHub)
+// Reordered to make Security the first tab
+val navItems = listOf(Screen.SecurityHub, Screen.Usage, Screen.History, Screen.DeviceInfo)
 
 @Composable
 fun MainApp() {
@@ -113,6 +117,7 @@ fun AppWithNavigation() {
     var deviceInfo by remember { mutableStateOf<DeviceInfo?>(null) }
     var permissionsInfo by remember { mutableStateOf<List<PermissionAppInfo>?>(null) }
     var specialAccessInfo by remember { mutableStateOf<AllSpecialAccessApps?>(null) }
+    var appComponentsList by remember { mutableStateOf<List<AppComponentInfo>?>(null) }
 
 
     var historyFilterMillis by remember { mutableStateOf(4 * 60 * 60 * 1000L) }
@@ -124,6 +129,7 @@ fun AppWithNavigation() {
         launch(Dispatchers.IO) { deviceInfo = getDetailedDeviceInfo(context) }
         launch(Dispatchers.IO) { permissionsInfo = getDangerousPermissionsApps(context) }
         launch(Dispatchers.IO) { specialAccessInfo = getSpecialAccessApps(context) }
+        launch(Dispatchers.IO) { appComponentsList = getInstalledApps(context.packageManager) }
     }
 
     // This effect re-runs ONLY when the history filter changes
@@ -145,6 +151,7 @@ fun AppWithNavigation() {
             securityInfo = securityInfo,
             permissionsInfo = permissionsInfo,
             specialAccessInfo = specialAccessInfo,
+            appComponentsList = appComponentsList,
             selectedHistoryDuration = historyFilterMillis,
             onHistoryDurationChange = { newDuration ->
                 historyFilterMillis = newDuration
@@ -197,12 +204,14 @@ fun AppNavHost(
     securityInfo: List<HiddenAppInfo>?,
     permissionsInfo: List<PermissionAppInfo>?,
     specialAccessInfo: AllSpecialAccessApps?,
+    appComponentsList: List<AppComponentInfo>?,
     selectedHistoryDuration: Long,
     onHistoryDurationChange: (Long) -> Unit,
     onRefreshSecurityInfo: () -> Unit,
     onRefreshSpecialAccessInfo: () -> Unit
 ) {
-    NavHost(navController, startDestination = Screen.Usage.route, modifier = modifier) {
+    // Set the start destination to the Security Hub
+    NavHost(navController, startDestination = Screen.SecurityHub.route, modifier = modifier) {
         composable(Screen.Usage.route) { UsageScreen(usageInfo) }
         composable(Screen.History.route) { HistoryScreen(historyInfo, selectedHistoryDuration, onHistoryDurationChange) }
         composable(Screen.DeviceInfo.route) { DeviceInfoScreen(deviceInfo) }
@@ -214,13 +223,13 @@ fun AppNavHost(
         composable(Screen.SpecialAccess.route) { SpecialAccessScreen(specialAccessInfo, onRefreshSpecialAccessInfo, navController) }
         composable(Screen.NetworkMonitor.route) { NetworkMonitorScreen(navController) }
 
-        // Add routes for the "Coming Soon" screens
-        composable(Screen.AppComponents.route) {
-            ComingSoonScreen(
-                navController = navController,
-                featureName = Screen.AppComponents.label,
-                featureIcon = Screen.AppComponents.icon
-            )
+        composable(Screen.AppComponents.route) { AppComponentsScreen(appComponentsList, navController) }
+        composable(
+            route = "${Screen.AppComponentsDetail.route}/{packageName}",
+            arguments = listOf(navArgument("packageName") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val packageName = backStackEntry.arguments?.getString("packageName") ?: ""
+            AppComponentDetailScreen(packageName = packageName, navController = navController)
         }
     }
 }

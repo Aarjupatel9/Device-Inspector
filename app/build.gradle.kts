@@ -7,6 +7,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     // Add the Compose Compiler plugin, which is now required.
     id("org.jetbrains.kotlin.plugin.compose")
+    id("kotlin-parcelize")
 }
 
 android {
@@ -14,7 +15,7 @@ android {
     compileSdk = 34 // Updated to latest stable SDK
 
     defaultConfig {
-        applicationId = "com.example.deviceinspector"
+        applicationId = "com.mhk.deviceinspector"
         minSdk = 23
         targetSdk = 34 // Updated to latest stable SDK
         versionCode = 1
@@ -33,6 +34,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
     compileOptions {

@@ -5,6 +5,9 @@
 package com.mhk.deviceinspector.data
 
 import android.graphics.drawable.Drawable
+import android.os.Parcelable
+import kotlinx.parcelize.Parcelize
+import kotlinx.parcelize.RawValue
 
 // Data class to hold detailed information about a hidden app
 data class HiddenAppInfo(
@@ -58,14 +61,36 @@ data class AllSpecialAccessApps(
 )
 
 // Data class for a single captured network connection
+@Parcelize
 data class NetworkConnectionInfo(
     val appName: String,
     val packageName: String,
-    val icon: Drawable?,
+    val icon: @RawValue Drawable?,
     val remoteAddress: String,
     val remotePort: Int,
     val protocol: String,
     val timestamp: Long
+) : Parcelable
+
+// Data class for the app list in the App Components screen
+data class AppComponentInfo(
+    val appName: String,
+    val packageName: String,
+    val icon: Drawable?
+)
+
+// Data class for the detailed view of a single app's components
+data class AppDetailInfo(
+    val appName: String,
+    val packageName: String,
+    val icon: Drawable?,
+    val manifestSummary: Map<String, String>,
+    val applicationFlags: List<String>,
+    val permissions: List<String>,
+    val activities: List<String>,
+    val services: List<String>,
+    val receivers: List<String>,
+    val providers: List<String>
 )
 
 

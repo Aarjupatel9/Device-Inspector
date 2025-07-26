@@ -32,8 +32,8 @@ fun SecurityHubScreen(navController: NavController) {
         SecurityFeature(Screen.HiddenApps, "Scan for installed apps without a launcher icon."),
         SecurityFeature(Screen.DangerousPermissions, "Audit apps with high-risk permissions."),
         SecurityFeature(Screen.SpecialAccess, "Monitor apps with admin or accessibility rights."),
-        SecurityFeature(Screen.NetworkMonitor, "Analyze real-time network traffic. (Coming Soon)"),
-        SecurityFeature(Screen.AppComponents, "Inspect manifest for services & receivers. (Coming Soon)")
+        SecurityFeature(Screen.AppComponents, "Inspect manifest for services, receivers, etc."),
+        SecurityFeature(Screen.NetworkMonitor, "Analyze real-time network traffic. (Experimental)")
     )
 
     GenericScreen("Security Center") {
