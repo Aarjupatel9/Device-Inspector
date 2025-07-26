@@ -1,3 +1,8 @@
+/*
+ * This file is the main entry point of the application and handles navigation.
+ * It now manages the state for all screens to prevent re-loading on tab switch.
+ * Location: app/src/main/java/com/mhk/deviceinspector/MainActivity.kt
+ */
 package com.mhk.deviceinspector
 
 import android.app.AppOpsManager
@@ -22,22 +27,15 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.*
-import com.google.accompanist.systemuicontroller.rememberSystemUiController
-import com.mhk.deviceinspector.data.AppEventInfo
-import com.mhk.deviceinspector.data.AppUsageInfo
-import com.mhk.deviceinspector.data.DeviceInfo
-import com.mhk.deviceinspector.data.HiddenAppInfo
+import androidx.navigation.navArgument
+import com.mhk.deviceinspector.data.*
 import com.mhk.deviceinspector.ui.components.PermissionRequestScreen
-import com.mhk.deviceinspector.ui.screens.DeviceInfoScreen
-import com.mhk.deviceinspector.ui.screens.HistoryScreen
-import com.mhk.deviceinspector.ui.screens.SecurityScreen
-import com.mhk.deviceinspector.ui.screens.UsageScreen
-import com.mhk.deviceinspector.ui.screens.findHiddenApps
-import com.mhk.deviceinspector.ui.screens.getAppLaunchHistory
-import com.mhk.deviceinspector.ui.screens.getAppUsageStats
-import com.mhk.deviceinspector.ui.screens.getDetailedDeviceInfo
+import com.mhk.deviceinspector.ui.screens.*
+import com.mhk.deviceinspector.ui.screens.security.*
 import com.mhk.deviceinspector.ui.theme.DeviceInspectorTheme
+import com.google.accompanist.systemuicontroller.rememberSystemUiController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -72,22 +70,29 @@ sealed class Screen(val route: String, val label: String, val icon: ImageVector)
     object Usage : Screen("usage", "Usage", Icons.Default.PieChart)
     object History : Screen("history", "History", Icons.Default.History)
     object DeviceInfo : Screen("device_info", "Device Info", Icons.Default.Info)
-    object Security : Screen("security", "Security", Icons.Default.Security)
+    object About : Screen("about", "About", Icons.Default.Info)
+
+    // Updated Security Section Routes
+    object SecurityHub : Screen("security_hub", "Security", Icons.Default.Security)
+    object HiddenApps : Screen("hidden_apps", "Hidden Apps", Icons.Default.VisibilityOff)
+    object DangerousPermissions : Screen("dangerous_permissions", "Dangerous Permissions", Icons.Default.VpnKey)
+    object SpecialAccess : Screen("special_access", "Special Access", Icons.Default.VpnLock)
+    object NetworkMonitor : Screen("network_monitor", "Network Monitor", Icons.Default.Public)
+    object AppComponents : Screen("app_components", "App Components", Icons.Default.Extension)
+    object AppComponentsDetail : Screen("app_components_detail", "Component Details", Icons.Default.List)
 }
 
-val navItems = listOf(Screen.Usage, Screen.History, Screen.DeviceInfo, Screen.Security)
+// Reordered to make Security the first tab
+val navItems = listOf(Screen.SecurityHub, Screen.Usage, Screen.History, Screen.DeviceInfo)
 
 @Composable
 fun MainApp() {
     val context = LocalContext.current
     var hasUsageStatsPermission by remember { mutableStateOf(hasUsageStatsPermission(context)) }
 
-    // This launcher opens the settings screen. When the user returns,
-    // its callback is fired, where we re-check the permission state.
     val usageSettingsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
-        // Update the permission state when the user returns from settings
         hasUsageStatsPermission = hasUsageStatsPermission(context)
     }
 
@@ -95,12 +100,12 @@ fun MainApp() {
         AppWithNavigation()
     } else {
         PermissionRequestScreen {
-            // Launch the settings screen using the launcher
             usageSettingsLauncher.launch(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AppWithNavigation() {
     val context = LocalContext.current
@@ -112,15 +117,21 @@ fun AppWithNavigation() {
     var historyInfo by remember { mutableStateOf<List<AppEventInfo>?>(null) }
     var securityInfo by remember { mutableStateOf<List<HiddenAppInfo>?>(null) }
     var deviceInfo by remember { mutableStateOf<DeviceInfo?>(null) }
-    // Add state for the history time filter, default to 4 hours
+    var permissionsInfo by remember { mutableStateOf<List<PermissionAppInfo>?>(null) }
+    var specialAccessInfo by remember { mutableStateOf<AllSpecialAccessApps?>(null) }
+    var appComponentsList by remember { mutableStateOf<List<AppComponentInfo>?>(null) }
+
+
     var historyFilterMillis by remember { mutableStateOf(4 * 60 * 60 * 1000L) }
 
-
-    // This effect runs only once, fetching initial data
+    // This effect runs only once, fetching all data in parallel background threads.
     LaunchedEffect(Unit) {
         launch(Dispatchers.IO) { usageInfo = getAppUsageStats(context) }
         launch(Dispatchers.IO) { securityInfo = findHiddenApps(context) }
         launch(Dispatchers.IO) { deviceInfo = getDetailedDeviceInfo(context) }
+        launch(Dispatchers.IO) { permissionsInfo = getDangerousPermissionsApps(context) }
+        launch(Dispatchers.IO) { specialAccessInfo = getSpecialAccessApps(context) }
+        launch(Dispatchers.IO) { appComponentsList = getInstalledApps(context.packageManager) }
     }
 
     // This effect re-runs ONLY when the history filter changes
@@ -129,28 +140,43 @@ fun AppWithNavigation() {
         launch(Dispatchers.IO) { historyInfo = getAppLaunchHistory(context, historyFilterMillis) }
     }
 
-
     Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Device Inspector") }, // Title is now static
+                actions = {
+                    IconButton(onClick = { navController.navigate(Screen.About.route) }) {
+                        Icon(Icons.Default.Info, contentDescription = "About")
+                    }
+                }
+            )
+        },
         bottomBar = { AppBottomNavigation(navController) }
     ) { innerPadding ->
         AppNavHost(
             navController = navController,
             modifier = Modifier.padding(innerPadding),
-            // Pass the data down to the screens
             usageInfo = usageInfo,
             historyInfo = historyInfo,
             deviceInfo = deviceInfo,
             securityInfo = securityInfo,
+            permissionsInfo = permissionsInfo,
+            specialAccessInfo = specialAccessInfo,
+            appComponentsList = appComponentsList,
             selectedHistoryDuration = historyFilterMillis,
-            // Provide a lambda to allow the history screen to change the filter
             onHistoryDurationChange = { newDuration ->
                 historyFilterMillis = newDuration
             },
-            // Provide a lambda to allow the security screen to trigger a refresh
             onRefreshSecurityInfo = {
                 coroutineScope.launch(Dispatchers.IO) {
                     securityInfo = null // Show loader
                     securityInfo = findHiddenApps(context)
+                }
+            },
+            onRefreshSpecialAccessInfo = {
+                coroutineScope.launch(Dispatchers.IO) {
+                    specialAccessInfo = null // Show loader
+                    specialAccessInfo = getSpecialAccessApps(context)
                 }
             }
         )
@@ -166,7 +192,7 @@ fun AppBottomNavigation(navController: NavHostController) {
             NavigationBarItem(
                 icon = { Icon(screen.icon, contentDescription = screen.label) },
                 label = { Text(screen.label) },
-                selected = currentRoute == screen.route,
+                selected = currentRoute?.startsWith(screen.route.substringBefore("_")) ?: false,
                 onClick = {
                     navController.navigate(screen.route) {
                         popUpTo(navController.graph.findStartDestination().id) { saveState = true }
@@ -187,15 +213,36 @@ fun AppNavHost(
     historyInfo: List<AppEventInfo>?,
     deviceInfo: DeviceInfo?,
     securityInfo: List<HiddenAppInfo>?,
+    permissionsInfo: List<PermissionAppInfo>?,
+    specialAccessInfo: AllSpecialAccessApps?,
+    appComponentsList: List<AppComponentInfo>?,
     selectedHistoryDuration: Long,
     onHistoryDurationChange: (Long) -> Unit,
-    onRefreshSecurityInfo: () -> Unit
+    onRefreshSecurityInfo: () -> Unit,
+    onRefreshSpecialAccessInfo: () -> Unit
 ) {
-    NavHost(navController, startDestination = Screen.Usage.route, modifier = modifier) {
+    // Set the start destination to the Security Hub
+    NavHost(navController, startDestination = Screen.SecurityHub.route, modifier = modifier) {
         composable(Screen.Usage.route) { UsageScreen(usageInfo) }
         composable(Screen.History.route) { HistoryScreen(historyInfo, selectedHistoryDuration, onHistoryDurationChange) }
         composable(Screen.DeviceInfo.route) { DeviceInfoScreen(deviceInfo) }
-        composable(Screen.Security.route) { SecurityScreen(securityInfo, onRefreshSecurityInfo) }
+        composable(Screen.About.route) { AboutScreen(navController) }
+
+        // New Security Navigation
+        composable(Screen.SecurityHub.route) { SecurityHubScreen(navController) }
+        composable(Screen.HiddenApps.route) { SecurityScreen(securityInfo, onRefreshSecurityInfo, navController) }
+        composable(Screen.DangerousPermissions.route) { DangerousPermissionsScreen(permissionsInfo, navController) }
+        composable(Screen.SpecialAccess.route) { SpecialAccessScreen(specialAccessInfo, onRefreshSpecialAccessInfo, navController) }
+        composable(Screen.NetworkMonitor.route) { NetworkMonitorScreen(navController) }
+
+        composable(Screen.AppComponents.route) { AppComponentsScreen(appComponentsList, navController) }
+        composable(
+            route = "${Screen.AppComponentsDetail.route}/{packageName}",
+            arguments = listOf(navArgument("packageName") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val packageName = backStackEntry.arguments?.getString("packageName") ?: ""
+            AppComponentDetailScreen(packageName = packageName, navController = navController)
+        }
     }
 }
 
